@@ -1,11 +1,10 @@
 #include "wifi_board.h"
-#include "audio/codecs/box_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "i2c_device.h"
-#include "iot/thing_manager.h"
 #include "pin_config.h"
 
 #include <esp_log.h>
@@ -17,12 +16,8 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/gpio.h>
-#include <wifi_station.h>
 
 #define TAG "AIBox"
-
-LV_FONT_DECLARE(font_puhui_20_4);
-LV_FONT_DECLARE(font_awesome_20_4);
 
 // ============== PCA9557 IO 扩展器（控制 LCD 电源/复位） ==============
 class Pca9557 : public I2cDevice {
@@ -72,21 +67,6 @@ private:
     void InitializeSt7701Display() {
         ESP_LOGI(TAG, "Init 3.95\" ST7701 RGB panel");
 
-        // 安装 3-wire SPI panel IO（用于发 ST7701 init 命令）
-        spi_line_config_t line_config = {
-            .cs_io_type = IO_TYPE_GPIO,
-            .cs_gpio_num = LCD_IO_SPI_CS,
-            .scl_io_type = IO_TYPE_GPIO,
-            .scl_gpio_num = LCD_IO_SPI_SCL,
-            .sda_io_type = IO_TYPE_GPIO,
-            .sda_gpio_num = LCD_IO_SPI_SDA,
-            .io_expander = NULL,
-        };
-        esp_lcd_panel_io_3wire_spi_config_t io_config = ST7701_PANEL_IO_3WIRE_SPI_CONFIG(line_config, 0);
-
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_3wire_spi(&io_config, &panel_io));
-
         // ST7701 厂商 init 序列（来自 1.5.9 已验证的鱼鹰光电 3.95 屏配置）
         static const st7701_lcd_init_cmd_t lcd_init_cmds[] = {
             {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
@@ -126,16 +106,47 @@ private:
             {0x29, (uint8_t[]){0x00}, 0, 0},    // Display On
         };
 
-        // RGB 面板配置
+        // 3-wire SPI panel IO（发 ST7701 init 命令）
+        spi_line_config_t line_config = {
+            .cs_io_type = IO_TYPE_GPIO,
+            .cs_gpio_num = LCD_IO_SPI_CS,
+            .scl_io_type = IO_TYPE_GPIO,
+            .scl_gpio_num = LCD_IO_SPI_SCL,
+            .sda_io_type = IO_TYPE_GPIO,
+            .sda_gpio_num = LCD_IO_SPI_SDA,
+            .io_expander = NULL,
+        };
+        esp_lcd_panel_io_3wire_spi_config_t io_config = ST7701_PANEL_IO_3WIRE_SPI_CONFIG(line_config, 0);
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_3wire_spi(&io_config, &panel_io));
+
+        // RGB 面板配置（v2.4.2 / esp_lcd_st7701 2.0.2 结构）
         esp_lcd_rgb_panel_config_t rgb_config = {};
         rgb_config.clk_src = LCD_CLK_SRC_DEFAULT;
-        rgb_config.psram_trans_align = 64;
+        rgb_config.timings = {
+            .pclk_hz = 16 * 1000 * 1000,
+            .h_res = LCD_H_RES,
+            .v_res = LCD_V_RES,
+            .hsync_pulse_width = 10,
+            .hsync_back_porch = 20,
+            .hsync_front_porch = 20,
+            .vsync_pulse_width = 4,
+            .vsync_back_porch = 8,
+            .vsync_front_porch = 8,
+            .flags = {
+                .pclk_active_neg = false,
+            },
+        };
         rgb_config.data_width = RGB_DATA_WIDTH;
-        rgb_config.bits_per_pixel = LCD_BIT_PER_PIXEL;
+        rgb_config.in_color_format = LCD_COLOR_FMT_RGB565;
+        rgb_config.out_color_format = LCD_COLOR_FMT_RGB565;
+        rgb_config.num_fbs = 1;
+        rgb_config.bounce_buffer_size_px = LCD_H_RES * LCD_BUFF_LINES;
+        rgb_config.dma_burst_size = 64;
+        rgb_config.hsync_gpio_num = LCD_IO_RGB_HSYNC;
+        rgb_config.vsync_gpio_num = LCD_IO_RGB_VSYNC;
         rgb_config.de_gpio_num = LCD_IO_RGB_DE;
         rgb_config.pclk_gpio_num = LCD_IO_RGB_PCLK;
-        rgb_config.vsync_gpio_num = LCD_IO_RGB_VSYNC;
-        rgb_config.hsync_gpio_num = LCD_IO_RGB_HSYNC;
         rgb_config.disp_gpio_num = LCD_IO_RGB_DISP;
         rgb_config.data_gpio_nums = {
             LCD_IO_RGB_DATA0,  LCD_IO_RGB_DATA1,  LCD_IO_RGB_DATA2,  LCD_IO_RGB_DATA3,
@@ -143,34 +154,27 @@ private:
             LCD_IO_RGB_DATA8,  LCD_IO_RGB_DATA9,  LCD_IO_RGB_DATA10, LCD_IO_RGB_DATA11,
             LCD_IO_RGB_DATA12, LCD_IO_RGB_DATA13, LCD_IO_RGB_DATA14, LCD_IO_RGB_DATA15,
         };
-        rgb_config.timings = ST7701_480_480_PANEL_60HZ_RGB_TIMING();
-        rgb_config.timings.h_res = LCD_H_RES;
-        rgb_config.timings.v_res = LCD_V_RES;
-        rgb_config.num_fbs = 1;
-        rgb_config.bounce_buffer_size_px = LCD_H_RES * LCD_BUFF_LINES;
         rgb_config.flags.fb_in_psram = 1;
 
         st7701_vendor_config_t vendor_config = {
-            .rgb_config = &rgb_config,
             .init_cmds = lcd_init_cmds,
             .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
+            .rgb_config = &rgb_config,
             .flags = {
-                .auto_del_panel_io = 0,
-                .mirror_by_cmd = 1,
+                .mirror_by_cmd = 0,
+                .auto_del_panel_io = 1,
             },
         };
 
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = LCD_IO_RST;
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_config.bits_per_pixel = LCD_BIT_PER_PIXEL;
+        panel_config.reset_gpio_num = LCD_IO_RST;
         panel_config.vendor_config = &vendor_config;
 
         esp_lcd_panel_handle_t panel_handle = nullptr;
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7701(panel_io, &panel_config, &panel_handle));
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
         // 通过 PCA9557 全部使能（保留 1.5.9 行为：开 IO 扩展器的所有位）
         pca9557_->SetOutputState(0, 1);
@@ -188,18 +192,12 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                EnterWifiConfigMode();
+                return;
             }
             app.ToggleChatState();
         });
-    }
-
-    // ---------- IoT ----------
-    void InitializeIot() {
-        auto& thing_manager = iot::ThingManager::GetInstance();
-        thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("Screen"));
     }
 
 public:
@@ -207,7 +205,6 @@ public:
         InitializeI2c();
         InitializeSt7701Display();
         InitializeButtons();
-        InitializeIot();
         GetBacklight()->RestoreBrightness();
     }
 
