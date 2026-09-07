@@ -120,41 +120,42 @@ private:
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_3wire_spi(&io_config, &panel_io));
 
-        // RGB 面板配置（v2.4.2 / esp_lcd_st7701 2.0.2 结构）
-        esp_lcd_rgb_panel_config_t rgb_config = {};
-        rgb_config.clk_src = LCD_CLK_SRC_DEFAULT;
-        rgb_config.timings = {
-            .pclk_hz = 16 * 1000 * 1000,
-            .h_res = LCD_H_RES,
-            .v_res = LCD_V_RES,
-            .hsync_pulse_width = 10,
-            .hsync_back_porch = 20,
-            .hsync_front_porch = 20,
-            .vsync_pulse_width = 4,
-            .vsync_back_porch = 8,
-            .vsync_front_porch = 8,
+        // RGB 面板配置（IDF 5.5 / esp_lcd_st7701 2.0.2 结构，颜色由 data_width=16 隐含 RGB565）
+        esp_lcd_rgb_panel_config_t rgb_config = {
+            .clk_src = LCD_CLK_SRC_DEFAULT,
+            .timings = {
+                .pclk_hz = 16 * 1000 * 1000,
+                .h_res = LCD_H_RES,
+                .v_res = LCD_V_RES,
+                .hsync_pulse_width = 10,
+                .hsync_back_porch = 10,
+                .hsync_front_porch = 20,
+                .vsync_pulse_width = 10,
+                .vsync_back_porch = 10,
+                .vsync_front_porch = 10,
+                .flags = {
+                    .pclk_active_neg = false,
+                },
+            },
+            .data_width = RGB_DATA_WIDTH,
+            .num_fbs = 1,
+            .bounce_buffer_size_px = LCD_H_RES * LCD_BUFF_LINES,
+            .dma_burst_size = 64,
+            .hsync_gpio_num = LCD_IO_RGB_HSYNC,
+            .vsync_gpio_num = LCD_IO_RGB_VSYNC,
+            .de_gpio_num = LCD_IO_RGB_DE,
+            .pclk_gpio_num = LCD_IO_RGB_PCLK,
+            .disp_gpio_num = LCD_IO_RGB_DISP,
+            .data_gpio_nums = {
+                LCD_IO_RGB_DATA0,  LCD_IO_RGB_DATA1,  LCD_IO_RGB_DATA2,  LCD_IO_RGB_DATA3,
+                LCD_IO_RGB_DATA4,  LCD_IO_RGB_DATA5,  LCD_IO_RGB_DATA6,  LCD_IO_RGB_DATA7,
+                LCD_IO_RGB_DATA8,  LCD_IO_RGB_DATA9,  LCD_IO_RGB_DATA10, LCD_IO_RGB_DATA11,
+                LCD_IO_RGB_DATA12, LCD_IO_RGB_DATA13, LCD_IO_RGB_DATA14, LCD_IO_RGB_DATA15,
+            },
             .flags = {
-                .pclk_active_neg = false,
+                .fb_in_psram = 1,
             },
         };
-        rgb_config.data_width = RGB_DATA_WIDTH;
-        rgb_config.in_color_format = LCD_COLOR_FMT_RGB565;
-        rgb_config.out_color_format = LCD_COLOR_FMT_RGB565;
-        rgb_config.num_fbs = 1;
-        rgb_config.bounce_buffer_size_px = LCD_H_RES * LCD_BUFF_LINES;
-        rgb_config.dma_burst_size = 64;
-        rgb_config.hsync_gpio_num = LCD_IO_RGB_HSYNC;
-        rgb_config.vsync_gpio_num = LCD_IO_RGB_VSYNC;
-        rgb_config.de_gpio_num = LCD_IO_RGB_DE;
-        rgb_config.pclk_gpio_num = LCD_IO_RGB_PCLK;
-        rgb_config.disp_gpio_num = LCD_IO_RGB_DISP;
-        rgb_config.data_gpio_nums = {
-            LCD_IO_RGB_DATA0,  LCD_IO_RGB_DATA1,  LCD_IO_RGB_DATA2,  LCD_IO_RGB_DATA3,
-            LCD_IO_RGB_DATA4,  LCD_IO_RGB_DATA5,  LCD_IO_RGB_DATA6,  LCD_IO_RGB_DATA7,
-            LCD_IO_RGB_DATA8,  LCD_IO_RGB_DATA9,  LCD_IO_RGB_DATA10, LCD_IO_RGB_DATA11,
-            LCD_IO_RGB_DATA12, LCD_IO_RGB_DATA13, LCD_IO_RGB_DATA14, LCD_IO_RGB_DATA15,
-        };
-        rgb_config.flags.fb_in_psram = 1;
 
         st7701_vendor_config_t vendor_config = {
             .init_cmds = lcd_init_cmds,
