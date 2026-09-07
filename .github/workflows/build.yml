@@ -38,11 +38,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          # 不创建 venv，让 ESP-IDF 用它自己的 Python 环境
+          # 避免 IDF_PYTHON_ENV_PATH 与 setup-python 冲突
 
       - name: Build AI 3.95 firmware
         env:
           IDF_PATH: /opt/esp-idf
-          IDF_PYTHON_ENV_PATH: ${{ github.workspace }}/.venv
         shell: bash
         run: |
           set -euo pipefail
