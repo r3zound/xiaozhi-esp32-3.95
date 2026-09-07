@@ -1,0 +1,11 @@
+{
+    "manufacturer": "ai-3.95",
+    "type": "ai-3.95",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "ai-3.95",
+            "sdkconfig_append": []
+        }
+    ]
+}

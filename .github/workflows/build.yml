@@ -1,125 +1,74 @@
-name: Build Boards
+name: Build AI 3.95 firmware
 
 on:
   push:
-    branches:
-      - main
-      - ci/* # for ci test
+    branches: [ 3.95 ]
   pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
+    branches: [ 3.95 ]
+  workflow_dispatch:
 
 jobs:
-  prepare:
-    name: Determine variants to build
-    runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:v6.0.2
-    outputs:
-      variants: ${{ steps.select.outputs.variants }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Test build tooling
-        run: python -m unittest discover -s scripts/tests -v
-
-      - id: list
-        name: Get all variant list
-        run: |
-          echo "all_variants=$(python scripts/build.py --list-boards --json)" >> $GITHUB_OUTPUT
-
-      - id: select
-        name: Select variants based on changes
-        shell: bash
-        env:
-          ALL_VARIANTS: ${{ steps.list.outputs.all_variants }}
-        run: |
-          EVENT_NAME="${{ github.event_name }}"
-
-          # push 到 main 分支，编译全部变体
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            echo "variants=$ALL_VARIANTS" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # pull_request 场景
-          # actions/checkout checks out GitHub's synthetic PR merge commit. Its
-          # first and second parents are the exact base and head commits used
-          # for this run, even when the event SHAs are not exposed as refs in
-          # the job container.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          BASE_SHA="HEAD^1"
-          HEAD_SHA="HEAD^2"
-          echo "Base: $(git rev-parse "$BASE_SHA"), Head: $(git rev-parse "$HEAD_SHA")"
-
-          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          echo -e "Changed files:\n$CHANGED"
-
-          SELECTED=$(printf '%s\n' "$CHANGED" | python scripts/build.py --select-changed)
-          echo "variants=$SELECTED" >> $GITHUB_OUTPUT
-
   build:
-    name: Build ${{ matrix.full_name }}
-    needs: prepare
-    if: ${{ needs.prepare.outputs.variants != '[]' }}
-    strategy:
-      fail-fast: false  # 单个变体失败不影响其它变体
-      matrix:
-        include: ${{ fromJson(needs.prepare.outputs.variants) }}
-    runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:v6.0.2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
 
-      - name: Build current variant
+      - name: Cache ESP-IDF
+        id: cache-idf
+        uses: actions/cache@v4
+        with:
+          path: /opt/esp-idf
+          key: esp-idf-v5.5-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            esp-idf-v5.5-${{ runner.os }}-
+
+      - name: Install ESP-IDF v5.5
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch v5.5.2 --depth 1 --recursive https://github.com/espressif/esp-idf.git /opt/esp-idf
+          /opt/esp-idf/install.sh
+
+      - name: Setup Python (idf.py needs >=3.9)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build AI 3.95 firmware
+        env:
+          IDF_PATH: /opt/esp-idf
+          IDF_PYTHON_ENV_PATH: ${{ github.workspace }}/.venv
         shell: bash
         run: |
+          set -euo pipefail
           source $IDF_PATH/export.sh
-          python scripts/build.py ${{ matrix.board }} --name ${{ matrix.name }}
+          cd $GITHUB_WORKSPACE
+          # 选定目标芯片
+          idf.py set-target esp32s3
+          # 选板子（写到 sdkconfig）
+          echo "CONFIG_BOARD_TYPE_AI_3_95=y" >> sdkconfig.defaults.esp32s3
+          # 构建
+          idf.py build
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: xiaozhi_${{ matrix.full_name }}_${{ github.sha }}
-          path: build/merged-binary.bin
-          if-no-files-found: error
-
-  esp32s31-idf61:
-    name: Build ${{ matrix.full_name }} with IDF 6.1
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - board: espressif/esp32-s31-function-coreboard-1
-            name: esp32-s31-function-coreboard-1
-            full_name: espressif-esp32-s31-function-coreboard-1
-          - board: espressif/esp32-s31-korvo-1
-            name: esp32-s31-korvo-1
-            full_name: espressif-esp32-s31-korvo-1
-    runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:release-v6.1
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build ESP32-S31 variant
+      - name: List build artifacts
         shell: bash
         run: |
-          source $IDF_PATH/export.sh
-          python scripts/build.py ${{ matrix.board }} --name ${{ matrix.name }}
+          set -euo pipefail
+          ls -la build/*.bin build/*.elf 2>/dev/null || ls -la build/
 
-      - name: Upload artifact
+      - name: Upload firmware binaries
         uses: actions/upload-artifact@v4
         with:
-          name: xiaozhi_${{ matrix.full_name }}_${{ github.sha }}
-          path: build/merged-binary.bin
-          if-no-files-found: error
+          name: ai-3.95-firmware
+          path: |
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/xiaozhi.bin
+          if-no-files-found: warn
+          retention-days: 30

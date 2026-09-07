@@ -184,6 +184,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_DOIT_S3_AIBOX
         bool "DOIT S3 AIBox (四博智联 AI 陪伴盒子)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_AI_3_95
+        bool "AI 3.95 英寸盒子 (ESP32-S3 + ST7701 + ES8311 + ES7210 + PCA9557)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_DU_CHATX
         bool "Du ChatX Wi-Fi (嘟嘟开发板)"
         depends on IDF_TARGET_ESP32S3
