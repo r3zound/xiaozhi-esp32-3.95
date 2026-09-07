@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
+    env:
+      IDF_PATH: /opt/esp-idf
+      # 不预设 Python 路径，让 ESP-IDF install.sh 自己探测并创建 venv
+      DEBIAN_FRONTEND: noninteractive
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,32 +28,29 @@ jobs:
         id: cache-idf
         uses: actions/cache@v4
         with:
-          path: /opt/esp-idf
+          path: |
+            /opt/esp-idf
+            /home/runner/.espressif
           key: esp-idf-v5.5-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
           restore-keys: |
             esp-idf-v5.5-${{ runner.os }}-
 
-      - name: Install ESP-IDF v5.5
+      - name: Install ESP-IDF v5.5 (with Python venv)
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
           git clone --branch v5.5.2 --depth 1 --recursive https://github.com/espressif/esp-idf.git /opt/esp-idf
-          /opt/esp-idf/install.sh
-
-      - name: Setup Python (idf.py needs >=3.9)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          # 不创建 venv，让 ESP-IDF 用它自己的 Python 环境
-          # 避免 IDF_PYTHON_ENV_PATH 与 setup-python 冲突
+          /opt/esp-idf/install.sh esp32s3
 
       - name: Build AI 3.95 firmware
-        env:
-          IDF_PATH: /opt/esp-idf
         shell: bash
         run: |
           set -euo pipefail
+          # source 会把 ESP-IDF 自己的 Python 放到 PATH 前
           source $IDF_PATH/export.sh
           cd $GITHUB_WORKSPACE
+          idf.py --version
           # 选定目标芯片
           idf.py set-target esp32s3
           # 选板子（写到 sdkconfig）
@@ -57,12 +59,14 @@ jobs:
           idf.py build
 
       - name: List build artifacts
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
           ls -la build/*.bin build/*.elf 2>/dev/null || ls -la build/
 
       - name: Upload firmware binaries
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ai-3.95-firmware
