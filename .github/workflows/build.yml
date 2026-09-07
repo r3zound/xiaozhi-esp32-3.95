@@ -53,10 +53,9 @@ jobs:
           idf.py --version
           # 选定目标芯片
           idf.py set-target esp32s3
-          # 选板子（写到 sdkconfig）
-          echo "CONFIG_BOARD_TYPE_AI_3_95=y" >> sdkconfig.defaults.esp32s3
-          # 构建
-          idf.py build
+          # 用 -D 直接覆盖 Kconfig 默认值（优先级高于 sdkconfig.defaults）
+          # -D 方式不依赖 sdkconfig 是否已生成，更可靠
+          idf.py -D CONFIG_BOARD_TYPE_AI_3_95=y build
 
       - name: List build artifacts
         if: success()
